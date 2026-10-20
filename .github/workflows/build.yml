@@ -1,23 +1,82 @@
-name: Build all devices
+name: Build Kaeru LK
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      TAG:
+        description: Release tag
+        required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 0
 
-    - name: Install build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential gcc-arm-linux-gnueabihf
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabihf \
+            binutils-arm-linux-gnueabihf \
+            gcc \
+            make \
+            python3 \
+            python3-pip \
+            git \
+            file
 
-    - name: Build all devices
-      run: bash .github/build-all.sh
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --break-system-packages \
+            -r utils/requirements.txt
+
+      - name: Validate toolchain
+        run: |
+          command -v arm-linux-gnueabihf-gcc
+          command -v arm-linux-gnueabihf-objcopy
+          command -v make
+          arm-linux-gnueabihf-gcc --version
+          python3 --version
+
+      - name: Validate Kaeru files
+        run: |
+          test -s lk-fire.img
+          test -s configs/xiaomi/fire_defconfig
+          test -s board/xiaomi/board-fire.c
+          test -x build.sh || chmod +x build.sh
+
+      - name: Validate defconfig
+        run: |
+          make fire_defconfig
+          test -f .config
+          grep -q 'CONFIG_XIAOMI_FIRE=y' .config
+          grep -q 'CONFIG_MEDIATEK_MT6768=y' .config
+
+      - name: Build Kaeru
+        run: |
+          ./build.sh fire lk-fire.img
+
+      - name: Validate output
+        run: |
+          test -s fire-kaeru.bin
+          file fire-kaeru.bin
+          sha256sum fire-kaeru.bin
+          stat -c '%n %s bytes' fire-kaeru.bin
+
+      - name: Create release
+        uses: ncipollo/release-action@main
+        with:
+          tag: ${{ inputs.TAG }}
+          name: Kaeru Fire
+          artifacts: fire-kaeru.bin
+          allowUpdates: true
+          generateReleaseNotes: true
